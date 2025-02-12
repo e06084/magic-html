@@ -5,6 +5,8 @@ logging.basicConfig(level=logging.INFO)
 
 import json
 import jieba
+import os
+from pathlib import Path
 
 jieba.setLogLevel(logging.INFO)
 from datetime import datetime
@@ -27,10 +29,10 @@ def get_score(target, prediction):
         return sents
 
     target_tokens_list = [
-        [x for x in jieba.lcut(s) if x != " "] for s in get_sents(target)
+        [x for x in jieba.cut(s) if x != " "] for s in get_sents(target)
     ]
     prediction_tokens_list = [
-        [x for x in jieba.lcut(s) if x != " "] for s in get_sents(prediction)
+        [x for x in jieba.cut(s) if x != " "] for s in get_sents(prediction)
     ]
 
     scoress = _summary_level_lcs(target_tokens_list, prediction_tokens_list)
@@ -116,6 +118,7 @@ with open("data/article/base.json", "r", encoding="utf-8") as f:
         with open(f"data/article/htmls/{k}.html", "r", encoding="utf-8") as ff:
             html_str = ff.read()
             v["html"] = html_str
+            v["filename"] = k
         global_datas.append(v)
 
 
@@ -222,6 +225,42 @@ def run_gne(name):
     evaluate_result(datas)
 
 
+def run_llm_web_kit(name):
+    from llm_web_kit.input.datajson import DataJson
+    from llm_web_kit.pipeline.pipeline_suit import PipelineSuit
+
+    datas = deepcopy(global_datas)
+    root = Path(__file__).parent
+    pipeline_config = os.path.join(root, 'config/llm_web_kit_config.jsonc')
+    pipeline_data_path = os.path.join(root, 'config/llm_web_kit_data_config.jsonl')
+    pipeline = PipelineSuit(pipeline_config)
+    assert pipeline is not None
+
+    # Read test data
+    with open(pipeline_data_path, 'r') as f:
+        test_data = json.loads(f.readline().strip())
+        input_data = DataJson(test_data)
+
+    # 为datas中的每个元素处理extract_content
+    for x in datas:
+        try:
+            # 从URL获取对应的文件名
+            file_name = x["filename"]
+            print("file_name:", file_name)
+            input_data.__setitem__('path', os.path.join(root, f"data/article/htmls/{file_name}.html"))
+            # 提取内容
+            result = pipeline.extract(input_data)
+            content_list = result.get_content_list()
+            content = content_list.to_txt()
+            x["extract_content"] = content
+        except Exception as e:
+            print(f"Error processing {x['filename']}: {e}")
+            x["extract_content"] = ""
+
+    global_info["func"].append(name)
+    evaluate_result(datas)
+
+
 # magic_html每条测试数据分数变化
 ori_scores = {}
 try:
@@ -232,14 +271,15 @@ except:
 
 # 自定义需要对比的方法
 all_funcs = {
-    "magic_html": run_magic_html,
-    "trafilatura": run_trafilatura,
-    "trafilatura_fallback": run_trafilatura_fallback,
-    "readability-lxml": run_readability_lxml,
-    "newspaper3k": run_newspaper3k,
-    "goose3": run_goose3,
-    "justext": run_justext,
-    "gne": run_gne
+    # "magic_html": run_magic_html,
+    # "trafilatura": run_trafilatura,
+    # "trafilatura_fallback": run_trafilatura_fallback,
+    # "readability-lxml": run_readability_lxml,
+    # "newspaper3k": run_newspaper3k,
+    # "goose3": run_goose3,
+    # "justext": run_justext,
+    # "gne": run_gne,
+    "llm_web_kit": run_llm_web_kit,
 }
 
 for k, v in all_funcs.items():
